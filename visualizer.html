@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SONIC MIRROR</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:wght@400;700&display=swap');
+
+  :root {
+    --acid: #00ffaa;
+    --hot: #ff003c;
+    --void: #0a0a0f;
+    --plasma: #bf00ff;
+    --solar: #ffcc00;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--void);
+    color: white;
+    font-family: 'Space Mono', monospace;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    cursor: crosshair;
+  }
+
+  canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  #ui {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  #start-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+    pointer-events: all;
+    text-align: center;
+    padding: 2rem;
+  }
+
+  #title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(4rem, 15vw, 10rem);
+    letter-spacing: 0.15em;
+    background: linear-gradient(135deg, var(--acid), var(--plasma), var(--hot));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+    animation: glitch-title 4s infinite;
+    position: relative;
+  }
+
+  #subtitle {
+    font-size: 0.75rem;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+  }
+
+  #btn {
+    background: transparent;
+    border: 2px solid var(--acid);
+    color: var(--acid);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    padding: 1.2rem 3rem;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.2s;
+  }
+
+  #btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--acid);
+    transform: translateX(-101%);
+    transition: transform 0.2s;
+    z-index: -1;
+  }
+
+  #btn:hover {
+    color: var(--void);
+  }
+
+  #btn:hover::before {
+    transform: translateX(0);
+  }
+
+  #hud {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    gap: 3rem;
+    align-items: flex-end;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .meter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .meter-label {
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    color: rgba(255,255,255,0.3);
+  }
+
+  .meter-value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--acid);
+    text-shadow: 0 0 20px var(--acid);
+    min-width: 3ch;
+    text-align: center;
+  }
+
+  #mode-indicator {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    color: rgba(255,255,255,0.2);
+    z-index: 10;
+    pointer-events: all;
+    cursor: pointer;
+    transition: color 0.3s;
+  }
+
+  #mode-indicator:hover { color: var(--acid); }
+
+  @keyframes glitch-title {
+    0%, 95%, 100% { transform: none; filter: none; }
+    96% { transform: translate(-3px, 1px) skew(1deg); filter: hue-rotate(90deg); }
+    97% { transform: translate(3px, -1px) skew(-1deg); filter: hue-rotate(180deg); }
+    98% { transform: translate(-1px, 2px); filter: hue-rotate(270deg); }
+    99% { transform: translate(1px, -1px); filter: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <div id="start-screen">
+    <div id="title">SONIC<br>MIRROR</div>
+    <div id="subtitle">visualiseur audio temps réel</div>
+    <button id="btn" onclick="startAudio()">▶ activer le micro</button>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="meter">
+    <div class="meter-label">BPM EST.</div>
+    <div class="meter-value" id="bpm-val">—</div>
+  </div>
+  <div class="meter">
+    <div class="meter-label">VOLUME</div>
+    <div class="meter-value" id="vol-val">0</div>
+  </div>
+  <div class="meter">
+    <div class="meter-label">FREQ MAX</div>
+    <div class="meter-value" id="freq-val">0</div>
+  </div>
+</div>
+
+<div id="mode-indicator" onclick="cycleMode()">MODE: <span id="mode-name">PLASMA</span> ↺</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let analyser, dataArray, bufferLength;
+let audioCtx;
+let started = false;
+let mode = 0;
+const modes = ['PLASMA', 'TUNNEL', 'STORM', 'FRACTAL', 'RORSCHACH'];
+let t = 0;
+
+// Beat detection
+let beatThreshold = 0.15;
+let lastBeat = 0;
+let beatIntervals = [];
+let isBeat = false;
+let beatFlash = 0;
+
+async function startAudio() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
+    source.connect(analyser);
+    bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+    started = true;
+    document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+    requestAnimationFrame(draw);
+  } catch(e) {
+    document.getElementById('btn').textContent = '✕ accès refusé';
+    document.getElementById('btn').style.borderColor = 'var(--hot)';
+    document.getElementById('btn').style.color = 'var(--hot)';
+  }
+}
+
+function cycleMode() {
+  mode = (mode + 1) % modes.length;
+  document.getElementById('mode-name').textContent = modes[mode];
+}
+
+function getVolume(arr) {
+  let sum = 0;
+  for (let i = 0; i < arr.length; i++) sum += arr[i];
+  return sum / arr.length / 255;
+}
+
+function detectBeat(bass) {
+  const now = performance.now();
+  if (bass > beatThreshold && now - lastBeat > 200) {
+    isBeat = true;
+    beatFlash = 1;
+    const interval = now - lastBeat;
+    if (interval < 2000) {
+      beatIntervals.push(interval);
+      if (beatIntervals.length > 8) beatIntervals.shift();
+    }
+    lastBeat = now;
+  } else {
+    isBeat = false;
+  }
+  beatFlash *= 0.85;
+}
+
+function getBPM() {
+  if (beatIntervals.length < 3) return null;
+  const avg = beatIntervals.reduce((a,b) => a+b, 0) / beatIntervals.length;
+  return Math.round(60000 / avg);
+}
+
+// ───────────────────── DRAW MODES ─────────────────────
+
+function drawPlasma(freq, vol, bass, treble) {
+  ctx.fillStyle = `rgba(10,10,15,${0.15 + (1 - vol) * 0.1})`;
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const bars = 180;
+  const radius = Math.min(W, H) * 0.2 + bass * 200;
+
+  for (let i = 0; i < bars; i++) {
+    const angle = (i / bars) * Math.PI * 2;
+    const idx = Math.floor(i / bars * bufferLength * 0.6);
+    const amp = freq[idx] / 255;
+    const len = amp * Math.min(W, H) * 0.35 + 10;
+
+    const hue = (i / bars * 360 + t * 60) % 360;
+    const grd = ctx.createLinearGradient(
+      cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius,
+      cx + Math.cos(angle) * (radius + len), cy + Math.sin(angle) * (radius + len)
+    );
+    grd.addColorStop(0, `hsla(${hue}, 100%, 60%, 0.9)`);
+    grd.addColorStop(1, `hsla(${(hue + 60) % 360}, 100%, 80%, 0)`);
+
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+    ctx.lineTo(cx + Math.cos(angle) * (radius + len), cy + Math.sin(angle) * (radius + len));
+    ctx.strokeStyle = grd;
+    ctx.lineWidth = 2 + amp * 3;
+    ctx.stroke();
+  }
+
+  // Core pulse
+  if (beatFlash > 0.1) {
+    const r = radius * beatFlash;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(255,255,255,${beatFlash * 0.4})`);
+    g.addColorStop(0.4, `rgba(0,255,170,${beatFlash * 0.2})`);
+    g.addColorStop(1, 'transparent');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawTunnel(freq, vol, bass, treble) {
+  ctx.fillStyle = `rgba(10,10,15,${0.2})`;
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const rings = 24;
+
+  for (let r = rings; r >= 0; r--) {
+    const progress = r / rings;
+    const size = progress * Math.min(W, H) * 0.7;
+    const freqIdx = Math.floor(r / rings * bufferLength * 0.4);
+    const amp = freq[freqIdx] / 255;
+
+    const hue = (r * 15 + t * 90) % 360;
+    const brightness = 40 + amp * 60;
+    ctx.strokeStyle = `hsl(${hue}, 100%, ${brightness}%)`;
+    ctx.lineWidth = 1.5 + amp * 4;
+
+    const sides = 6;
+    ctx.beginPath();
+    for (let s = 0; s <= sides; s++) {
+      const a = (s / sides) * Math.PI * 2 + t * 0.3 * (r % 2 === 0 ? 1 : -1);
+      const warp = size + amp * 40 * Math.sin(s * 3 + t * 5);
+      const x = cx + Math.cos(a) * warp;
+      const y = cy + Math.sin(a) * warp * 0.8;
+      s === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawStorm(freq, vol, bass, treble) {
+  ctx.fillStyle = 'rgba(10,10,15,0.07)';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const points = 512;
+
+  ctx.beginPath();
+  for (let i = 0; i < points; i++) {
+    const idx = Math.floor(i / points * bufferLength * 0.8);
+    const amp = freq[idx] / 255;
+    const angle = (i / points) * Math.PI * 4 + t;
+    const r = (i / points) * Math.min(W, H) * 0.45 * (0.5 + amp * 0.7);
+    const noise = Math.sin(i * 0.3 + t * 3) * amp * 80;
+    const x = cx + Math.cos(angle) * (r + noise);
+    const y = cy + Math.sin(angle) * (r + noise);
+
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+
+  const hue = (t * 30) % 360;
+  ctx.strokeStyle = `hsl(${hue}, 100%, 70%)`;
+  ctx.lineWidth = 1 + vol * 3;
+  ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+  ctx.shadowBlur = 10 + vol * 20;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+function drawFractal(freq, vol, bass, treble) {
+  ctx.fillStyle = `rgba(10,10,15,${0.12})`;
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+
+  function drawBranch(x, y, angle, depth, length) {
+    if (depth <= 0 || length < 2) return;
+    const idx = Math.floor((depth / 8) * bufferLength * 0.5);
+    const amp = freq[idx] / 255;
+    const newLen = length * (0.6 + amp * 0.25);
+    const ex = x + Math.cos(angle) * length;
+    const ey = y + Math.sin(angle) * length;
+
+    const hue = (depth * 40 + t * 60) % 360;
+    ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${depth / 8})`;
+    ctx.lineWidth = depth * 0.8;
+    ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    const spread = 0.4 + amp * 0.6;
+    const branches = 2 + (isBeat && depth > 5 ? 1 : 0);
+    for (let b = 0; b < branches; b++) {
+      const a = angle + (b - (branches-1)/2) * spread;
+      drawBranch(ex, ey, a, depth - 1, newLen);
+    }
+  }
+
+  ctx.shadowBlur = 0;
+  const baseLen = 80 + bass * 100;
+  const globalAngle = t * 0.2;
+  drawBranch(cx, cy + H * 0.2, -Math.PI / 2 + globalAngle, 7, baseLen);
+  drawBranch(cx, cy + H * 0.2, -Math.PI / 2 - globalAngle, 7, baseLen);
+}
+
+function drawRorschach(freq, vol, bass, treble) {
+  ctx.fillStyle = 'rgba(10,10,15,0.15)';
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  const count = 120;
+
+  // Mirror both sides
+  [-1, 1].forEach(side => {
+    ctx.beginPath();
+    for (let i = 0; i <= count; i++) {
+      const pct = i / count;
+      const angle = pct * Math.PI;
+      const idx = Math.floor(pct * bufferLength * 0.7);
+      const amp = freq[idx] / 255;
+      const r = 50 + amp * Math.min(W, H) * 0.3 + Math.sin(pct * Math.PI * 4 + t * 2) * 30;
+      const x = cx + side * Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r * (0.8 + bass * 0.5);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    const hue1 = (t * 40) % 360;
+    const hue2 = (hue1 + 120) % 360;
+    const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(W, H) * 0.4);
+    grd.addColorStop(0, `hsla(${hue1}, 100%, 70%, 0.9)`);
+    grd.addColorStop(0.5, `hsla(${hue2}, 100%, 50%, 0.6)`);
+    grd.addColorStop(1, `hsla(${hue1}, 100%, 30%, 0)`);
+    ctx.fillStyle = grd;
+    ctx.fill();
+    ctx.strokeStyle = `hsla(${hue1}, 100%, 80%, 0.5)`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+}
+
+// ───────────────────── MAIN LOOP ─────────────────────
+
+function draw() {
+  if (!started) return;
+  requestAnimationFrame(draw);
+  t += 0.008;
+
+  analyser.getByteFrequencyData(dataArray);
+
+  const bassData = dataArray.slice(0, 10);
+  const trebleData = dataArray.slice(Math.floor(bufferLength * 0.6));
+  const bass = getVolume(bassData);
+  const treble = getVolume(trebleData);
+  const vol = getVolume(dataArray);
+
+  detectBeat(bass);
+
+  // Beat flash overlay
+  if (beatFlash > 0.05) {
+    ctx.fillStyle = `rgba(255,255,255,${beatFlash * 0.06})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  switch(mode) {
+    case 0: drawPlasma(dataArray, vol, bass, treble); break;
+    case 1: drawTunnel(dataArray, vol, bass, treble); break;
+    case 2: drawStorm(dataArray, vol, bass, treble); break;
+    case 3: drawFractal(dataArray, vol, bass, treble); break;
+    case 4: drawRorschach(dataArray, vol, bass, treble); break;
+  }
+
+  // HUD update
+  document.getElementById('vol-val').textContent = Math.round(vol * 200);
+  const peakIdx = dataArray.indexOf(Math.max(...dataArray));
+  const freq = Math.round(peakIdx * audioCtx.sampleRate / (analyser.fftSize * 10));
+  document.getElementById('freq-val').textContent = freq;
+  const bpm = getBPM();
+  document.getElementById('bpm-val').textContent = bpm || '—';
+}
+
+// Keyboard shortcut
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' && started) cycleMode();
+});
+</script>
+</body>
+</html>
